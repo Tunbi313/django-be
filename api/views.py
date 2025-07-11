@@ -1,17 +1,18 @@
 from rest_framework import generics,viewsets,permissions,status
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
-from .models import Product,Order,OrderItem,CartItem,Cart
+from .models import Product,Order,OrderItem,CartItem,Cart,UserProfile
 from django.contrib.auth.models import User
-from .serializers import (ProductSerializer,OrderSerializer,OrderItemSerializer,UserSerializer,CartItemSerializer,CartSerializer)
+from .serializers import (ProductSerializer,OrderSerializer,OrderItemSerializer,UserSerializer,CartItemSerializer,CartSerializer,UserProfileSerializer)
 from rest_framework.authentication import TokenAuthentication
 from rest_framework.views import APIView
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny,IsAdminUser
 from django.core.exceptions import ObjectDoesNotExist
 from rest_framework.authtoken.models import Token
 from .permissions import IsAdminOrReadOnly,IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.db import transaction
+from rest_framework.generics import ListAPIView,RetrieveAPIView
 #user
 class UserView(viewsets.ModelViewSet):
         queryset = User.objects.all()
@@ -120,6 +121,33 @@ class CreateAdminView(APIView):
             }
         }, status=status.HTTP_201_CREATED)
 
+#put,get userprofile
+class MyProfileView(APIView) :
+    permission_classes = [IsAuthenticated]
+
+    def post(self,request):
+        if hasattr(request.user, 'profile'):
+            return Response({'detail': 'Profile đã tồn tại. Dùng PUT để cập nhật.'}, status=400)
+
+        serializer = UserProfileSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(user=request.user)
+            return Response(serializer.data, status=201)
+        return Response(serializer.errors, status=400)
+
+    def get(self,request):
+        profile, created = UserProfile.objects.get_or_create(user=request.user)
+        serializer = UserProfileSerializer(profile)
+        return Response(serializer.data)
+    
+    def put(self,request):
+        profile,_ = UserProfile.objects.get_or_create(user=request.user)
+        serializer = UserProfileSerializer(profile,data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response({"errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
 
 #CRUD Prodcut
 
@@ -136,10 +164,6 @@ class CartView(APIView):
         cart, _ = Cart.objects.get_or_create(user=request.user)
         serializer = CartSerializer(cart)
         return Response(serializer.data)
-
-
-
-
     
 #add to cart
 
@@ -217,6 +241,18 @@ class RemoveCartItemView(APIView):
         cart_item = get_object_or_404(CartItem, id=item_id, cart__user=request.user)
         cart_item.delete()
         return Response({"message": "Đã xóa khỏi giỏ hàng"}, status=status.HTTP_200_OK)
+    
+#removecart
+class RemoveCartView(APIView):
+    permission_classes =[IsAuthenticated]
+
+    def delete(self, request):
+        cart = get_object_or_404(Cart, user=request.user)
+        cart.delete()
+        return Response({"message": "Đã xóa giỏ hàng thành công"}, status=status.HTTP_200_OK)
+        
+
+
 
 #checkout
 class CheckoutView(APIView):
@@ -225,36 +261,46 @@ class CheckoutView(APIView):
     @transaction.atomic()
     def post(self, request):
         user = request.user
-        try:
-            cart = Cart.objects.get(user=user)
-            cart_items = cart.items.all()
+        cart = Cart.objects.get(user=user)
+        cart_items = cart.items.all()
 
-            if not cart_items.exists():
-                return Response({"error": "Giỏ hàng của bạn đang trống."}, status=400)
+        if not cart_items.exists():
+            return Response({"error": "Giỏ hàng của bạn đang trống."}, status=400)
 
-            # Tạo Order
-            order = Order.objects.create(user=user, status='pending', total_price=0)
-
-            # Tạo OrderItem từ CartItem
+        # Kiểm tra đã có order pending chưa
+        pending_order = Order.objects.filter(user=user, status='pending').first()
+        if pending_order:
+            # Xóa hết OrderItem cũ
+            pending_order.items.all().delete()
+            # Thêm lại sản phẩm từ cart
             for cart_item in cart_items:
                 OrderItem.objects.create(
-                    order=order,
+                    order=pending_order,
                     product=cart_item.product,
                     quantity=cart_item.quantity,
                     price=cart_item.product.price
                 )
+            pending_order.update_total_price()
+            pending_order.save()
+            serializer = OrderSerializer(pending_order)
+            return Response({
+                "message": "Đã cập nhật đơn hàng đang chờ thanh toán.",
+                "order": serializer.data
+            }, status=200)
 
-            order.update_total_price()
-            order.save()
-
-            # Xóa cart sau khi checkout
-            cart_items.delete()
-
-            serializer = OrderSerializer(order)
-            return Response(serializer.data, status=201)
-
-        except Cart.DoesNotExist:
-            return Response({"error": "Không tìm thấy giỏ hàng."}, status=404)
+        # Nếu chưa có order pending, tạo mới như cũ
+        order = Order.objects.create(user=user, status='pending', total_price=0)
+        for cart_item in cart_items:
+            OrderItem.objects.create(
+                order=order,
+                product=cart_item.product,
+                quantity=cart_item.quantity,
+                price=cart_item.product.price
+            )
+        order.update_total_price()
+        order.save()
+        serializer = OrderSerializer(order)
+        return Response(serializer.data, status=201)
         
 #pay oder
 class PayOrderView(APIView):
@@ -277,13 +323,11 @@ class PayOrderView(APIView):
 
         order.status = 'paid'
         order.save()
+        Cart.objects.filter(user=user).delete()
 
-        return Response({"message": "Thanh toán thành công", "order_id": order.id})
+        return Response({"message": "Thanh toán thành công", "order_id": order.id,"status":order.status})
 
 #oderlistview 
-from rest_framework.generics import ListAPIView
-from .models import Order
-from .serializers import OrderSerializer
 
 class OrderListView(ListAPIView):
     permission_classes = [IsAuthenticated]
@@ -291,3 +335,40 @@ class OrderListView(ListAPIView):
 
     def get_queryset(self):
         return Order.objects.filter(user=self.request.user).order_by('-created_at')
+    
+
+#orderDetailview
+class OrderDetailView(RetrieveAPIView):
+    queryset = Order.objects.all()
+    serializer_class = OrderSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        # Chỉ cho phép user lấy đơn hàng của chính mình
+        return Order.objects.filter(user=self.request.user)
+    
+#all Products
+
+
+class ProductListAllView(APIView):
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        products = Product.objects.all()
+        serializer = ProductSerializer(products, many=True)
+        return Response(serializer.data)
+    
+#all order
+class AllOrdersAdminView(ListAPIView):
+    queryset = Order.objects.all()
+    serializer_class = OrderSerializer
+    permission_classes = [IsAdminUser]  # Chỉ admin mới truy cập được
+    pagination_class = None #tắt phân trang
+
+
+#all userprofile
+class AllUserProfilesAdminView(ListAPIView):
+    queryset = UserProfile.objects.all()
+    serializer_class = UserProfileSerializer
+    permission_classes = [IsAdminUser]
+    pagination_class = None  # Nếu muốn trả về toàn bộ, không phân trang
+

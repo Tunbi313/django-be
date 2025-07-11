@@ -13,7 +13,13 @@ from .views import (
     RemoveCartItemView,
     CheckoutView,
     PayOrderView,
-    OrderListView
+    OrderListView,
+    RemoveCartView,
+    MyProfileView,
+    OrderDetailView,
+    ProductListAllView,
+    AllOrdersAdminView,
+    AllUserProfilesAdminView
 )
 
 router = DefaultRouter()
@@ -21,6 +27,7 @@ router.register('products', ProductViewSet, basename='product')
 router.register('users',UserView)
 
 urlpatterns = [
+    path('products/all/', ProductListAllView.as_view(), name='product-list-all'),
     path('', include(router.urls)),
     path('register/', RegisterView.as_view(), name='register'),
     path('login/', LoginView.as_view(), name='login'),
@@ -33,4 +40,11 @@ urlpatterns = [
     path('orders/checkout/', CheckoutView.as_view(), name='checkout'),
     path('orders/<int:order_id>/pay/', PayOrderView.as_view(), name='pay-order'),
     path('orders/', OrderListView.as_view(), name='order-list'),
+    path('cart/remove/',RemoveCartView.as_view(),name='remove-cart'),
+    path('profile/',MyProfileView.as_view(),name='my-profile'),
+    path('orders/<int:pk>/', OrderDetailView.as_view(), name='order-detail'),
+    path('admin/orders/', AllOrdersAdminView.as_view(), name='all-orders-admin'),
+    path('admin/userprofiles/', AllUserProfilesAdminView.as_view(), name='all-userprofiles-admin'),
+
+    
 ]   
