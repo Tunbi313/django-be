@@ -73,12 +73,16 @@ class OrderItemSerializer(serializers.ModelSerializer):
 #order
 class OrderSerializer(serializers.ModelSerializer):
     user_profile = serializers.SerializerMethodField()
-    items = serializers.SerializerMethodField()  # Đảm bảo dùng SerializerMethodField
-
+    items = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
-        fields = ['id', 'status', 'total_price', 'created_at', 'user_profile','items']
+        fields = [
+            'id', 'status', 'total_price', 'created_at',
+            'receiver_name', 'address', 'phone', 'email',  # Thông tin riêng của order
+            'user_profile',  # Thông tin profile gốc của user
+            'items'
+        ]
 
     def get_user_profile(self, obj):
         try:
@@ -93,7 +97,13 @@ class OrderSerializer(serializers.ModelSerializer):
             }
         except:
             return None
+
     def get_items(self, obj):
-        OrderItemSerializer(obj.items.all(), many=True, context={'request': self.context.get('request')}).data
-        # Lấy tất cả order items liên quan đến order này
-        return OrderItemSerializer(obj.items.all(), many=True).data
+        return OrderItemSerializer(obj.items.all(), many=True, context=self.context).data
+
+#order update
+
+class OrderUpdateInfoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Order
+        fields = ['receiver_name','address','phone','email']

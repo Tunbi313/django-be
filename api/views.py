@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
 from .models import Product,Order,OrderItem,CartItem,Cart,UserProfile
 from django.contrib.auth.models import User
-from .serializers import (ProductSerializer,OrderSerializer,OrderItemSerializer,UserSerializer,CartItemSerializer,CartSerializer,UserProfileSerializer)
+from .serializers import (ProductSerializer,OrderSerializer,OrderItemSerializer,UserSerializer,CartItemSerializer,CartSerializer,UserProfileSerializer,OrderUpdateInfoSerializer)
 from rest_framework.authentication import TokenAuthentication
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny,IsAdminUser
@@ -12,7 +12,7 @@ from rest_framework.authtoken.models import Token
 from .permissions import IsAdminOrReadOnly,IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.db import transaction
-from rest_framework.generics import ListAPIView,RetrieveAPIView
+from rest_framework.generics import ListAPIView,RetrieveAPIView,RetrieveUpdateDestroyAPIView
 #user
 class UserView(viewsets.ModelViewSet):
         queryset = User.objects.all()
@@ -267,9 +267,23 @@ class CheckoutView(APIView):
         if not cart_items.exists():
             return Response({"error": "Giỏ hàng của bạn đang trống."}, status=400)
 
+        #Lấy thông tin từ UserProfile
+        try:
+            profile = user.profile
+        except:
+            return Response({"error":"Người dùng chưa có thông tin"})
+
+
+
         # Kiểm tra đã có order pending chưa
         pending_order = Order.objects.filter(user=user, status='pending').first()
         if pending_order:
+            # Gán lại thông tin người nhận từ profile
+            pending_order.receiver_name = f"{profile.first_name} {profile.last_name}"
+            pending_order.address = profile.address
+            pending_order.phone = profile.phone
+            pending_order.email = profile.email
+
             # Xóa hết OrderItem cũ
             pending_order.items.all().delete()
             # Thêm lại sản phẩm từ cart
@@ -290,6 +304,10 @@ class CheckoutView(APIView):
 
         # Nếu chưa có order pending, tạo mới như cũ
         order = Order.objects.create(user=user, status='pending', total_price=0)
+        order.receiver_name = f"{profile.first_name} {profile.last_name}"
+        order.address = profile.address
+        order.phone = profile.phone
+        order.email = profile.email    
         for cart_item in cart_items:
             OrderItem.objects.create(
                 order=order,
@@ -344,8 +362,10 @@ class OrderDetailView(RetrieveAPIView):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        # Chỉ cho phép user lấy đơn hàng của chính mình
-        return Order.objects.filter(user=self.request.user)
+        user = self.request.user
+        if user.is_staff or user.is_superuser:
+            return Order.objects.all()  # Admin xem được tất cả
+        return Order.objects.filter(user=user)  # User thường chỉ xem của mình
     
 #all Products
 
@@ -371,4 +391,28 @@ class AllUserProfilesAdminView(ListAPIView):
     serializer_class = UserProfileSerializer
     permission_classes = [IsAdminUser]
     pagination_class = None  # Nếu muốn trả về toàn bộ, không phân trang
+
+
+#update oder info
+
+class UpdateOrderInfoView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def put(self,request,order_id):
+        order = get_object_or_404(Order,id=order_id,user=request.user)
+
+        if order.status != 'pending':
+            return Response ({"error":"chỉ cập nhận đơn hàng khi chưa thanh toán"})
+
+        serializer = OrderUpdateInfoSerializer(order, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({"message":"Cập nhật thông tin đơn hàng thành công"})
+        return Response(serializer.errors,status=400)
+
+# Admin RESTful order detail view
+class AdminOrderDetailView(RetrieveUpdateDestroyAPIView):
+    queryset = Order.objects.all()
+    serializer_class = OrderSerializer
+    permission_classes = [IsAdminUser]
 

@@ -67,6 +67,13 @@ class Order(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     created_at = models.DateTimeField(auto_now_add=True)
 
+    #Thông tin người nhận
+    receiver_name = models.CharField(max_length=255, null=True, blank=True)
+    address = models.TextField(null=True, blank=True)
+    phone = models.CharField(max_length=20, null=True, blank=True)
+    email = models.EmailField(null=True, blank=True)
+
+
     def update_total_price(self):
         total = sum(item.price * item.quantity for item in self.items.all())
         self.total_price = total

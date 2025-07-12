@@ -19,7 +19,9 @@ from .views import (
     OrderDetailView,
     ProductListAllView,
     AllOrdersAdminView,
-    AllUserProfilesAdminView
+    AllUserProfilesAdminView,
+    UpdateOrderInfoView,
+    AdminOrderDetailView
 )
 
 router = DefaultRouter()
@@ -45,6 +47,8 @@ urlpatterns = [
     path('orders/<int:pk>/', OrderDetailView.as_view(), name='order-detail'),
     path('admin/orders/', AllOrdersAdminView.as_view(), name='all-orders-admin'),
     path('admin/userprofiles/', AllUserProfilesAdminView.as_view(), name='all-userprofiles-admin'),
+    path('orders/<int:order_id>/update-info',UpdateOrderInfoView.as_view(),name ='update-order-info'),
+    path('admin/orders/<int:pk>/', AdminOrderDetailView.as_view(), name='admin-order-detail'),
 
     
 ]   
