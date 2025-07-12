@@ -1,0 +1,87 @@
+BÁO CÁO XÂY DỰNG BACKEND WEB BÁN HÀNG
+
+1. GIỚI THIỆU CHUNG
+Hệ thống backend được xây dựng bằng Django và Django REST Framework, cung cấp các API phục vụ cho website bán hàng hiện đại. Hệ thống hỗ trợ quản lý sản phẩm, giỏ hàng, đơn hàng, người dùng, phân quyền admin, tìm kiếm sản phẩm, xác thực bảo mật bằng JWT.
+
+2. KIẾN TRÚC VÀ CÁC THÀNH PHẦN CHÍNH
+- Mô hình dữ liệu: User, UserProfile, Product, Cart, CartItem, Order, OrderItem.
+- API: Đăng ký, đăng nhập, xác thực, quản lý sản phẩm, giỏ hàng, đơn hàng, người dùng, admin.
+- Luồng chức năng: Đăng nhập → Xem sản phẩm → Thêm vào giỏ → Checkout → Đặt hàng → Thanh toán → Quản trị admin.
+
+3. CHI TIẾT TỪNG API
+
+3.1. Xác thực & Người dùng
+| API | Method | Quyền | Mô tả | Body/Params | Response |
+|-----|--------|-------|-------|-------------|----------|
+| /api/register/ | POST | Public | Đăng ký tài khoản | {username, password, email} | Thông báo |
+| /api/login/ | POST | Public | Đăng nhập, trả về JWT | {username, password} | {access, refresh, user} |
+| /api/logout/ | POST | User | Đăng xuất | {refresh} | Thông báo |
+| /api/profile/ | GET/POST/PUT | User | Xem/tạo/cập nhật profile | {...} | Thông tin profile |
+| /api/admin/users/ | GET | Admin | Lấy danh sách user |  | Danh sách user |
+| /api/admin/userprofiles/ | GET | Admin | Lấy danh sách user profile |  | Danh sách profile |
+
+3.2. Sản phẩm
+| API | Method | Quyền | Mô tả | Params/Body | Response |
+|-----|--------|-------|-------|-------------|----------|
+| /api/products/ | GET | All | Lấy danh sách sản phẩm (có search) | ?search=... | Danh sách sản phẩm |
+| /api/products/all/ | GET | All | Lấy tất cả sản phẩm (không phân trang) |  | Danh sách sản phẩm |
+| /api/products/<id>/ | GET | All | Xem chi tiết sản phẩm |  | Thông tin sản phẩm |
+| /api/products/ | POST | Admin | Thêm sản phẩm | {name, ...} | Sản phẩm mới |
+| /api/products/<id>/ | PUT/PATCH | Admin | Sửa sản phẩm | {...} | Sản phẩm đã sửa |
+| /api/products/<id>/ | DELETE | Admin | Xóa sản phẩm |  | Thông báo |
+
+3.3. Giỏ hàng
+| API | Method | Quyền | Mô tả | Params/Body | Response |
+|-----|--------|-------|-------|-------------|----------|
+| /api/cart/ | GET | User | Xem giỏ hàng |  | Thông tin giỏ hàng |
+| /api/cart/add/ | POST | User | Thêm sản phẩm vào giỏ | {product_id, quantity} | Thông báo |
+| /api/cart/item/<item_id>/update/ | PUT | User | Cập nhật số lượng | {quantity} | Thông báo |
+| /api/cart/item/<item_id>/remove/ | DELETE | User | Xóa sản phẩm khỏi giỏ |  | Thông báo |
+| /api/cart/remove/ | DELETE | User | Xóa toàn bộ giỏ hàng |  | Thông báo |
+
+3.4. Đơn hàng
+| API | Method | Quyền | Mô tả | Params/Body | Response |
+|-----|--------|-------|-------|-------------|----------|
+| /api/orders/checkout/ | POST | User | Tạo/cập nhật đơn hàng pending từ giỏ hàng |  | Thông tin order |
+| /api/orders/ | GET | User | Lấy danh sách đơn hàng của user |  | Danh sách order |
+| /api/orders/<order_id>/ | GET | User/Admin | Xem chi tiết đơn hàng |  | Thông tin order |
+| /api/orders/<order_id>/update-info | PUT | User | Cập nhật thông tin nhận hàng (pending) | {receiver_name, ...} | Thông báo |
+| /api/orders/<order_id>/pay/ | POST | User | Thanh toán đơn hàng |  | Thông báo |
+| /api/admin/orders/ | GET | Admin | Lấy tất cả đơn hàng |  | Danh sách order |
+| /api/admin/orders/<order_id>/ | GET/PUT/PATCH/DELETE | Admin | Xem/sửa/xóa đơn hàng bất kỳ | {status, ...} | Thông báo/chi tiết |
+
+4. SƠ ĐỒ LUỒNG (MÔ TẢ TEXT)
+- User đăng nhập/đăng ký → Xem sản phẩm → Thêm vào giỏ → Xem/cập nhật giỏ → Checkout → Tạo/Cập nhật Order pending → Thanh toán → Order chuyển trạng thái paid.
+- Admin: Quản lý sản phẩm, user, profile, đơn hàng (xem/sửa/xóa/trạng thái).
+
+5. TÀI LIỆU HƯỚNG DẪN SỬ DỤNG
+- Đăng nhập: POST /api/login/ với {username, password}, nhận access token.
+- Gửi các request cần xác thực với header: Authorization: Bearer <access_token>
+- Lấy sản phẩm: GET /api/products/ hoặc /api/products/?search=giay
+- Thêm vào giỏ: POST /api/cart/add/ với {product_id, quantity}
+- Checkout: POST /api/orders/checkout/
+- Thanh toán: POST /api/orders/<order_id>/pay/
+- Admin quản lý: GET/PUT/PATCH/DELETE /api/admin/orders/<order_id>/
+
+6. LƯU Ý KHI SỬ DỤNG
+- Tất cả API cần xác thực phải gửi header Authorization.
+- Admin cần đăng nhập bằng tài khoản có quyền admin.
+- Các API nhạy cảm chỉ admin mới truy cập được.
+
+7. VÍ DỤ CURL
+- Đăng nhập:
+curl -X POST http://localhost:8000/api/login/ -H "Content-Type: application/json" -d '{"username":"admin","password":"123"}'
+- Lấy sản phẩm:
+curl -X GET http://localhost:8000/api/products/ -H "Authorization: Bearer <access_token>"
+- Thêm vào giỏ:
+curl -X POST http://localhost:8000/api/cart/add/ -H "Authorization: Bearer <access_token>" -H "Content-Type: application/json" -d '{"product_id":1,"quantity":2}'
+- Checkout:
+curl -X POST http://localhost:8000/api/orders/checkout/ -H "Authorization: Bearer <access_token>"
+- Thanh toán:
+curl -X POST http://localhost:8000/api/orders/12/pay/ -H "Authorization: Bearer <access_token>"
+- Admin xóa đơn hàng:
+curl -X DELETE http://localhost:8000/api/admin/orders/12/ -H "Authorization: Bearer <admin_access_token>"
+
+---
+
+Bạn chỉ cần copy toàn bộ nội dung này vào Word hoặc Google Docs, định dạng lại tiêu đề, bảng nếu muốn cho đẹp hơn. 

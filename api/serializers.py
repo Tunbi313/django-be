@@ -1,6 +1,8 @@
 from rest_framework import serializers
 from .models import Product,Order,OrderItem,User,CartItem,Cart,UserProfile
 from django.db import transaction
+from rest_framework_simplejwt.tokens import RefreshToken
+
 
 #UserProfile
 class UserProfileSerializer(serializers.ModelSerializer):

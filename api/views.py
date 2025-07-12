@@ -1,6 +1,9 @@
-from rest_framework import generics,viewsets,permissions,status
+from re import search
+from django.contrib.auth import authenticate
+from rest_framework import generics,viewsets,permissions,status,filters
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
+from rest_framework_simplejwt.tokens import RefreshToken
 from .models import Product,Order,OrderItem,CartItem,Cart,UserProfile
 from django.contrib.auth.models import User
 from .serializers import (ProductSerializer,OrderSerializer,OrderItemSerializer,UserSerializer,CartItemSerializer,CartSerializer,UserProfileSerializer,OrderUpdateInfoSerializer)
@@ -49,18 +52,18 @@ class LoginView(APIView):
         if not username or not password:
             return Response({"error": "Vui lòng nhập username và password"}, status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            user = User.objects.get(username=username)
-        except ObjectDoesNotExist:
-            return Response({"error": "Username không tồn tại"}, status=status.HTTP_400_BAD_REQUEST)
+        user = authenticate(username=username,password=password)
+        if user is None:
+            return Response({'error': 'Tài khoản không đúng'}, status=status.HTTP_401_UNAUTHORIZED)
         
         if user.check_password(password):
-            # Tạo hoặc lấy token cho user
-            token, created = Token.objects.get_or_create(user=user)
+            # Tạo hoặc lấy JWT tokens cho user
+            refresh = RefreshToken.for_user(user)
             
             return Response({
                 "message": "Đăng nhập thành công",
-                "token": token.key,
+                "access": str(refresh.access_token),
+                "refresh": str(refresh),
                 "user": {
                     "id": user.id,
                     "username": user.username,
@@ -74,16 +77,19 @@ class LoginView(APIView):
 
 #api logout
 class LogoutView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-    
-    def post(self, request):
-        try:
-            # Xóa token của user hiện tại
-            request.user.auth_token.delete()
-            return Response({"message": "Đăng xuất thành công"}, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({"error": "Có lỗi xảy ra khi đăng xuất"}, status=status.HTTP_400_BAD_REQUEST)
+    permission_classes = [IsAuthenticated]
 
+    def post(self, request):
+        refresh_token = request.data.get('refresh')
+        if not refresh_token:
+            return Response({'error': 'Thiếu refresh token'}, status=400)
+
+        try:
+            token = RefreshToken(refresh_token)
+            token.blacklist()
+            return Response({"message": "Đăng xuất thành công"}, status=200)
+        except Exception as e:
+            return Response({"error": "Token không hợp lệ hoặc đã hết hạn"}, status=400)
 
 # Tạo admin user (chỉ dùng để test)
 class CreateAdminView(APIView):
@@ -155,6 +161,9 @@ class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
     permission_classes = [IsAdminOrReadOnly]
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['name']
+    
     
 #getcartview
 class CartView(APIView):
@@ -376,6 +385,7 @@ class ProductListAllView(APIView):
         products = Product.objects.all()
         serializer = ProductSerializer(products, many=True)
         return Response(serializer.data)
+        
     
 #all order
 class AllOrdersAdminView(ListAPIView):
