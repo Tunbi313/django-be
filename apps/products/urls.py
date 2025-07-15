@@ -8,6 +8,7 @@ router.register('', ProductViewSet, basename='product')
 app_name = 'products'
 
 urlpatterns = [
-    path('', include(router.urls)),
     path('all/', ProductListAllView.as_view(), name='product-list-all'),
+    path('', include(router.urls)),
+   
 ] 

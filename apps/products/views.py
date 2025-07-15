@@ -1,7 +1,7 @@
 from rest_framework import viewsets
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated,AllowAny
 from rest_framework import filters
 from .models import Product
 from .serializers import ProductSerializer
@@ -17,7 +17,7 @@ class ProductViewSet(viewsets.ModelViewSet):
 
 
 class ProductListAllView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]  # Allow any user to access this view
     
     def get(self, request):
         products = Product.objects.all()

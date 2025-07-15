@@ -8,6 +8,12 @@ from django.db import transaction
 from .models import Order, OrderItem
 from .serializers import OrderSerializer, OrderUpdateInfoSerializer
 from apps.cart.models import Cart, CartItem
+from core.vnpay_config import VNPAY_CONFIG
+from core.vnpay import generate_vnpay_url
+import hmac
+import hashlib
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
 
 
 class CheckoutView(APIView):
@@ -144,3 +150,46 @@ class AdminOrderDetailView(RetrieveUpdateDestroyAPIView):
     queryset = Order.objects.all()
     serializer_class = OrderSerializer
     permission_classes = [IsAdminUser] 
+
+
+class VNPayPaymentView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, order_id):
+        user = request.user
+        order = get_object_or_404(Order, id=order_id, user=user, status='pending')
+        amount = order.total_price
+        payment_url = generate_vnpay_url(order, amount, VNPAY_CONFIG, user)
+        return Response({"payment_url": payment_url})
+
+@method_decorator(csrf_exempt, name='dispatch')
+class VNPayReturnView(APIView):
+    def get(self, request):
+        print("[VNPay Callback] Đã nhận callback từ VNPay")
+        params = request.query_params.dict()
+        if not params:
+            print("[VNPay Callback] Không nhận được tham số nào từ VNPay!")
+            return Response({"message": "Không nhận được tham số callback từ VNPay"}, status=400)
+        vnp_secure_hash = params.pop('vnp_SecureHash', None)
+        # Sắp xếp tham số và tạo chuỗi hash
+        sorted_params = sorted((k, v) for k, v in params.items() if k.startswith('vnp_'))
+        hash_data = '&'.join([f"{k}={v}" for k, v in sorted_params])
+        hash_secret = VNPAY_CONFIG["vnp_HashSecret"]
+        secure_hash = hmac.new(hash_secret.encode('utf-8'), hash_data.encode('utf-8'), hashlib.sha512).hexdigest()
+        print("[VNPay Callback] params:", params)
+        print("[VNPay Callback] hash_data:", hash_data)
+        print("[VNPay Callback] secure_hash:", secure_hash)
+        print("[VNPay Callback] vnp_secure_hash (from VNPay):", vnp_secure_hash)
+        if secure_hash == vnp_secure_hash:
+            order_id = params.get('vnp_TxnRef')
+            order = Order.objects.filter(id=order_id).first()
+            if order and params.get('vnp_ResponseCode') == '00':
+                order.status = 'paid'
+                order.save()
+                return Response({"message": "Thanh toán thành công", "order_id": order.id})
+            else:
+                return Response({"message": "Thanh toán thất bại hoặc đơn hàng không tồn tại"}, status=400)
+        else:
+            print("[VNPay Callback] LỖI: Sai chữ ký!")
+            return Response({"message": "Sai chữ ký VNPay"}, status=400) 
+

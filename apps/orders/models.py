@@ -2,6 +2,7 @@ from django.db import models
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from apps.products.models import Product
+from django import forms
 
 
 class Order(models.Model):
@@ -61,3 +62,7 @@ class OrderItem(models.Model):
 
     def __str__(self):
         return f"{self.quantity} x {self.product.name} trong đơn #{self.order.id}" 
+
+
+
+
