@@ -14,6 +14,7 @@ import hmac
 import hashlib
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
+from .utils import send_payment_email
 
 
 class CheckoutView(APIView):
@@ -90,16 +91,28 @@ class PayOrderView(APIView):
         if order.status != 'pending':
             return Response({"error": "Đơn hàng đã thanh toán hoặc không hợp lệ"}, status=400)
 
-        # Trừ tồn kho (nếu chưa trừ)
+        # Kiểm tra tồn kho trước khi trừ
         for item in order.items.all():
             product = item.product
             if item.quantity > product.quantity:
-                return Response({"error": f"Sản phẩm '{product.name}' đã hết hàng"}, status=400)
+                return Response({"error": f"Sản phẩm '{product.name}' đã hết hàng hoặc không đủ số lượng"}, status=400)
+
+        # Nếu đủ hàng, mới trừ tồn kho
+        for item in order.items.all():
+            product = item.product
             product.quantity -= item.quantity
             product.save()
 
         order.status = 'paid'
         order.save()
+
+
+        # Gửi email xác nhận đơn hàng (nếu có)
+        try:
+            send_payment_email(user, order)
+        except Exception as e:
+            print("Lỗi gửi email:", e)
+
         Cart.objects.filter(user=user).delete()
 
         return Response({"message": "Thanh toán thành công", "order_id": order.id, "status": order.status})

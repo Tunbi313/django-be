@@ -8,6 +8,7 @@ from django import forms
 class Order(models.Model):
     STATUS_CHOICES = [
         ('pending', 'Pending'),
+        ('paid', 'Paid'),
         ('shipped', 'Shipped'),
         ('delivered', 'Delivered'),
     ]
@@ -28,6 +29,9 @@ class Order(models.Model):
         self.total_price = total
 
     def save(self, *args, **kwargs):
+        # Đảm bảo khi tạo mới đơn hàng, status luôn là 'pending' nếu là tạo mới
+        if not self.pk:
+            self.status = 'pending'
         super().save(*args, **kwargs)
 
     def __str__(self):
