@@ -50,3 +50,5 @@ Trạng thái: {order.status}
         admin_emails,
         fail_silently=False,
     )
+
+        
