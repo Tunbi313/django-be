@@ -26,7 +26,7 @@ if openrouter_api_key is None or openrouter_model is None:
 # Khởi tạo LLM (biến toàn cục, được khởi tạo một lần)
 llm = ChatOpenAI(
     model=openrouter_model,  # Sử dụng 'model' thay vì 'model_name'
-    temperature=0.3, # Nên để temperature thấp hơn cho RAG để AI ít "sáng tạo" và bám sát dữ liệu hơn
+    temperature=0.7, # Nên để temperature thấp hơn cho RAG để AI ít "sáng tạo" và bám sát dữ liệu hơn
     api_key=SecretStr(openrouter_api_key),  # Bọc api_key bằng SecretStr
     base_url="https://openrouter.ai/api/v1",
 )
