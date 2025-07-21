@@ -6,5 +6,6 @@ class ChatbotConfig(AppConfig):
     name = 'chatbot'
 
     def ready(self):
-        from .chat_utils import prepare_knowledge_base_sync
+        from .chat_utils import prepare_knowledge_base_sync, fetch_data_from_database
         prepare_knowledge_base_sync()
+        fetch_data_from_database()
