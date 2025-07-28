@@ -16,11 +16,13 @@ from pydantic import SecretStr
 from langchain.docstore.document import Document
 from langchain.chains import create_retrieval_chain
 
+
 # Tải biến môi trường ngay khi module được import
 load_dotenv()
-
 openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
 openrouter_model = os.getenv("OPENROUTER_MODEL")
+print("OPENROUTER_MODEL:", openrouter_model)
+print("OPENROUTER_API_KEY",openrouter_api_key)
 
 # Kiểm tra biến môi trường và raise lỗi nếu không tìm thấy
 if openrouter_api_key is None or openrouter_model is None:
@@ -36,7 +38,7 @@ db_password = os.getenv("DB_PASSWORD")
 # Khởi tạo LLM (biến toàn cục, được khởi tạo một lần)
 llm = ChatOpenAI(
     model=openrouter_model,  # Sử dụng 'model' thay vì 'model_name'
-    temperature=0.7, # Nên để temperature thấp hơn cho RAG để AI ít "sáng tạo" và bám sát dữ liệu hơn
+    temperature=0.00001, # Nên để temperature thấp hơn cho RAG để AI ít "sáng tạo" và bám sát dữ liệu hơn
     api_key=SecretStr(openrouter_api_key),  # Bọc api_key bằng SecretStr
     base_url="https://openrouter.ai/api/v1",
 )
@@ -67,52 +69,39 @@ def fetch_data_from_database(user_id=None):
         cur = conn.cursor()  # Sửa ở đây
 
         sql_query = """
-        SELECT p.id, p.name, p.description, p.price, c.name as category
+        SELECT p.id, p.name, p.description, p.price, p.created_at, c.name as category,
+               CASE 
+                   WHEN sp.discount_percent IS NOT NULL 
+                   AND sp.start_date <= NOW() 
+                   AND sp.end_date >= NOW() 
+                   THEN p.price * (100 - sp.discount_percent) / 100
+                   ELSE p.price 
+               END as current_price,
+               COALESCE(sp.discount_percent, 0) as discount_percent
         FROM products_product p
-        LEFT JOIN products_category c ON p.category_id = c.id;
+        LEFT JOIN products_category c ON p.category_id = c.id
+        LEFT JOIN saleproduct_saleproduct sp ON p.id = sp.product_id;
         """
         cur.execute(sql_query)
         rows = cur.fetchall()
 
         for row in rows:
-            product_id, name, description, price, category = row
+            product_id, name, description, price, created_at, category, current_price, discount_percent = row
             content = (
                 f"ID sản phẩm: {product_id}.\n"
                 f"Tên: {name}.\n"
                 f"Mô tả: {description}.\n"
-                f"Giá: {price}.\n"
-                f"Danh mục: {category}."
+                f"Giá gốc: {price}.\n"
+                f"Giá hiện tại: {current_price}.\n"
+                f"Giảm giá: {discount_percent}%.\n"
+                f"Danh mục: {category}.\n"
+                f"Thời gian: {created_at}"
             )
             metadata = {"source": "database", "table": "products", "product_id": product_id, "name": name}
             db_documents.append(Document(page_content=content, metadata=metadata))
 
-        # Truy vấn đơn hàng
-        if user_id is not None:
-            order_query = """
-            SELECT id, status, total_price, created_at
-            FROM orders_order
-            WHERE user_id = %s;
-            """
-            cur.execute(order_query, (user_id,))
-        else:
-            order_query = """
-            SELECT id, status, total_price, created_at, user_id
-            FROM orders_order;
-            """
-            cur.execute(order_query)
-        order_rows = cur.fetchall()
+       
 
-        for row in order_rows:
-            order_id, status, total_price, created_at, order_user_id = row
-            content = (
-                f"ID đơn hàng: {order_id}.\n"
-                f"Trạng thái: {status}.\n"
-                f"Tổng giá: {total_price}.\n"
-                f"Ngày tạo: {created_at}.\n"
-                f"Người tạo: {order_user_id}."
-            )
-            metadata = {"source": "database", "table": "orders", "order_id": order_id, "user_id": order_user_id}
-            db_documents.append(Document(page_content=content, metadata=metadata))
 
         cur.close()
         print(f"Đã tải thành công {len(db_documents)} document từ database.")
@@ -133,9 +122,9 @@ def fetch_data_from_database(user_id=None):
 
 
 
-def prepare_knowledge_base_sync(data_dir="data", user_id=None):
+def prepare_knowledge_base_sync(data_dir="data"):
     """
-    Tải tài liệu, chia nhỏ và tạo vector store (hàm đồng bộ).
+    Tải tài liệu, tạo vector store (không split nhỏ hơn từng sản phẩm).
     Sẽ được gọi một lần khi server khởi động.
     """
     global knowledge_base, retrieval_chain, is_rag_ready
@@ -146,7 +135,7 @@ def prepare_knowledge_base_sync(data_dir="data", user_id=None):
         print(f"Đang quét thư mục dữ liệu: {data_dir}")
         for filename in os.listdir(data_dir):
             filepath = os.path.join(data_dir, filename)
-            if os.path.isfile(filepath): # Đảm bảo là file
+            if os.path.isfile(filepath):
                 if filename.endswith(".pdf"):
                     print(f"Đang tải file PDF: {filename}")
                     loader = PyPDFLoader(filepath)
@@ -155,72 +144,54 @@ def prepare_knowledge_base_sync(data_dir="data", user_id=None):
                     print(f"Đang tải file TXT: {filename}")
                     loader = TextLoader(filepath, encoding="utf-8")
                     documents.extend(loader.load())
-                # elif filename.endswith(".docx"):
-                #     from langchain_community.document_loaders import UnstructuredWordDocumentLoader
-                #     print(f"Đang tải file DOCX: {filename}")
-                #     loader = UnstructuredWordDocumentLoader(filepath)
-                #     documents.extend(loader.load())
-                # Thêm các loại loader khác nếu cần (ví dụ: UnstructuredMarkdownLoader, WebBaseLoader)
     else:
         print(f"Thư mục dữ liệu '{data_dir}' không tồn tại hoặc không phải là thư mục. RAG sẽ không được kích hoạt.")
         is_rag_ready = False
-        return # Thoát hàm nếu không có thư mục dữ liệu
+        return
 
-    # Thêm: Load từ database
-    db_documents = fetch_data_from_database(user_id=user_id)
+    # Thêm: Load từ database (mỗi sản phẩm là 1 Document)
+    db_documents = fetch_data_from_database()
     documents.extend(db_documents)
+
 
     if not documents:
         print("Không tìm thấy tài liệu nào trong thư mục hoặc database.")
         is_rag_ready = False
         return
 
-    # Chia nhỏ tài liệu thành các đoạn nhỏ hơn (chunks)
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000, # Kích thước mỗi đoạn văn bản
-        chunk_overlap=200 # Phần trùng lặp giữa các đoạn để giữ ngữ cảnh
-    )
-    chunks = text_splitter.split_documents(documents)
-    print(f"Đã chia tài liệu thành {len(chunks)} đoạn văn bản.")
+    # Không split nhỏ hơn nữa, mỗi document là 1 sản phẩm
+    chunks = documents
+    print(f"Tổng số document/chunk: {len(chunks)}")
 
-    # Tạo embeddings
+    # In ra các chunk đầu tiên (tối đa 10 chunk đầu, 500 ký tự đầu)
+    
     print("Đang tạo embeddings...")
-    # Sử dụng mô hình embedding cục bộ. Có thể thay bằng OpenAIEmbeddings qua OpenRouter nếu muốn
-    # from langchain_openai import OpenAIEmbeddings
-    # embeddings = OpenAIEmbeddings(openai_api_key=openrouter_api_key, base_url="https://openrouter.ai/api/v1")
     embeddings = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
-
-    # Tạo Vector Store
-    # FAISS là một lựa chọn tốt để lưu trữ cục bộ trong bộ nhớ
     knowledge_base = FAISS.from_documents(chunks, embeddings)
     print("Đã tạo Vector Store thành công.")
 
     # --- Xây dựng Chain cho RAG ---
-    retriever = knowledge_base.as_retriever()
+    retriever = knowledge_base.as_retriever(search_kwargs={"k": 8})
 
-    # Prompt cho LLM
-    # MessagesPlaceholder(variable_name="history") cho phép LangChain tự động chèn lịch sử trò chuyện
+    # Prompt tối ưu
     prompt = ChatPromptTemplate.from_messages(
         [
-            ("system", "Bạn là một trợ lý AI chuyên về sản phẩm. Dưới đây là thông tin truy xuất được từ cơ sở dữ liệu và tài liệu. Hãy trả lời thật chi tiết, chính xác dựa trên ngữ cảnh. Nếu không tìm thấy thông tin, hãy nói rõ là không biết."),
+            ("system", "Bạn là trợ lý AI về sản phẩm. Khi trả lời về sản phẩm, hãy trích xuất và trình bày đầy đủ các trường: tên, ID, danh mục, giá, mô tả,... từ dữ liệu truy xuất được. Nếu không có trường nào, hãy nói rõ là không có. Tuyệt đối không bịa thông tin."),
             MessagesPlaceholder(variable_name="history"),
             ("human", "Ngữ cảnh: {context}\n\nCâu hỏi: {input}")
         ]
     )
 
-    # Chain để kết hợp tài liệu và tạo phản hồi
     document_chain = create_stuff_documents_chain(llm, prompt)
-
-    # Chain hoàn chỉnh: Truy xuất -> Tăng cường -> Tạo sinh
     retrieval_chain = create_retrieval_chain(retriever, document_chain)
-    is_rag_ready = True # Đánh dấu RAG đã sẵn sàng
+    is_rag_ready = True
     print("Đã khởi tạo Retrieval Chain.")
+
 
 def get_chatbot_response(user_message: str, chat_history_raw: list, user_id: int = None):
     """
     Xử lý tin nhắn người dùng và trả về phản hồi từ chatbot.
     """
-    # Chuyển đổi lịch sử từ Frontend (list of dict) sang định dạng của LangChain (list of Message objects)
     chat_history_parsed = []
     for msg in chat_history_raw:
         if isinstance(msg, dict):
@@ -231,31 +202,29 @@ def get_chatbot_response(user_message: str, chat_history_raw: list, user_id: int
             elif msg.get("role") == "system":
                 chat_history_parsed.append(SystemMessage(content=msg.get("content", "")))
         elif isinstance(msg, str):
-            # Nếu là string, mặc định coi là tin nhắn của người dùng
             chat_history_parsed.append(HumanMessage(content=msg))
 
     try:
-        if is_rag_ready and retrieval_chain: # Chỉ sử dụng RAG nếu nó đã được preload thành công
+        if is_rag_ready and retrieval_chain:
             print("Sử dụng RAG chain...")
             response = retrieval_chain.invoke({
                 "input": user_message,
                 "history": chat_history_parsed
             })
+            # In context thực tế để debug
+            if "context" in response:
+                print("Context truy xuất được:")
+                print(response["context"])
+            else:
+                print("Không có context truy xuất được!")
             ai_response = response["answer"]
         else:
             print("Sử dụng LLM cơ bản (không có RAG).")
-            # Nếu không có RAG, hoặc RAG chưa sẵn sàng, dùng LLM cơ bản
-            # Đảm bảo có SystemMessage ở đầu nếu chưa có trong lịch sử
             if not chat_history_parsed or chat_history_parsed[0].type != "system":
                 chat_history_parsed.insert(0, SystemMessage(content="Bạn là một trợ lý AI hữu ích và thân thiện. Bạn sẽ trả lời bằng tiếng Việt."))
-
-            # Thêm tin nhắn hiện tại của người dùng
             chat_history_parsed.append(HumanMessage(content=user_message))
-
-            # Gọi LLM trực tiếp
             llm_response = llm.invoke(chat_history_parsed)
             ai_response = llm_response.content
-
         return ai_response
     except Exception as e:
         print(f"Lỗi LangChain/LLM khi xử lý chat: {e}")
