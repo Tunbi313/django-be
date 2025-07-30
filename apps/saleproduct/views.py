@@ -1,3 +1,4 @@
+from rest_framework.views import APIView
 from rest_framework import generics
 from .models import SaleProduct
 from .serializers import SaleProductSerializer
@@ -43,3 +44,14 @@ class SaleProductCreateUpdateAPIView(generics.CreateAPIView, generics.UpdateAPIV
 
     def update(self, request, *args, **kwargs):
         return self.create(request, *args, **kwargs)
+    
+class DeleteSaleProductAPIView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def delete(self, request, product_id):
+        try:
+            sale = SaleProduct.objects.get(product_id=product_id)
+            sale.delete()
+            return Response({'message': f'Sale cho sản phẩm {product_id} đã được xóa.'}, status=status.HTTP_204_NO_CONTENT)
+        except SaleProduct.DoesNotExist:
+            return Response({'error': 'Không tìm thấy sale cho sản phẩm này.'}, status=status.HTTP_404_NOT_FOUND)

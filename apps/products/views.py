@@ -7,7 +7,7 @@ from rest_framework import filters
 from .models import Product,Category
 from .serializers import ProductSerializer,CategorySerializer
 from core.permissions import IsAdminOrReadOnly
-
+from chatbot.chat_utils import prepare_knowledge_base_sync
 
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all().order_by('id')
@@ -23,6 +23,22 @@ class ProductViewSet(viewsets.ModelViewSet):
         if category_id:
             queryset = queryset.filter(category_id=category_id)
         return queryset
+    
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        prepare_knowledge_base_sync()
+        return instance
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        prepare_knowledge_base_sync()
+        return instance
+
+    def perform_destroy(self, instance):
+        instance.delete()
+        prepare_knowledge_base_sync()
+
+    
 
 
 class ProductListAllView(APIView):
